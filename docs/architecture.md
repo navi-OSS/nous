@@ -125,6 +125,15 @@ The coefficients `[c₀, c₁, ..., cₙ]` are stored as a PyTorch tensor.
 | `compose(outer, inner)` | Function composition via Horner-like iteration |
 | `eval_at(coeffs, x)` | Horner's method evaluation |
 
+### Hilbert Engine: FFT Acceleration
+To ensure scalability on GPUs, the Hilbert Engine uses **FFT-based polynomial convolution** for multiplication and composition. This replaces sequential O(N²) loops with parallelizable O(N log N) operations, enabling massive speedups for batched workloads.
+
+### LLM Integration Layer
+The `nous.llm` module provides the glue for embedding Nous inside neural architectures:
+- **EmbeddingBridge**: Learns a bidirectional mapping between LLM hidden states and Taylor coefficients.
+- **NousLayer**: A differentiable `nn.Module` that applies symbolic operations (derivatives, roots, etc.) to hidden space.
+- **Soft Selection**: Uses Gumbel-Softmax or predicted logits to choose which symbolic operation to apply, allowing the model to learn the optimal "reasoning strategy" via backpropagation.
+
 ### Root Solving
 
 The `NousAlgebra` class finds polynomial roots using **Durand-Kerner iteration** with:
