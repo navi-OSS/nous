@@ -1,0 +1,99 @@
+Metadata-Version: 2.4
+Name: nous
+Version: 2.0.0
+Summary: Nous Engine: Differentiable Symbolic Programming
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: torch
+
+# Nous: The Differentiable Python Interpreter
+
+**Nous** is a neuro-symbolic engine that enables **end-to-end differentiation through Python code**. It allows Neural Networks to learn by backpropagating gradients *through* the execution of standard Python functions, loops, and logic.
+
+## 🚀 Key Features
+
+- **Native Python Tracing**: Compatible with standard Python syntax (lists, loops, objects, exceptions). No rigid DSLs.
+- **Differentiable Control Flow**: Implements "Soft Logic" (`soft_if`, `soft_switch`, `soft_index`) to enable gradient flow through branches and memory access.
+- **Taylor-Mode Differentiation**: Uses a Hilbert Engine backend to compute high-order derivatives automatically.
+- **Hardware Accelerated**: Fully integrated with PyTorch for CUDA/MPS acceleration.
+
+## 🧪 Experiments ("System 2" Learning)
+
+Nous enables a new class of **System 2** learning tasks where models learn *algorithms* and *plans* rather than just patterns.
+
+### 1. Neural Rocket Landing (`demo_neural_landing.py`)
+A Neural Network learns to control a rocket physics simulation.
+- **Task**: Output a sequence of 30 thrust commands to soft-land a rocket.
+- **Learning**: The interpreter runs the physics code `pos += vel * dt`, calculates the loss `pos^2 + vel^2`, and backpropagates to the policy.
+- **Result**: The model learns a perfect "Bang-Bang" braking strategy from scratch.
+
+### 2. Neural Programmer (`demo_program_synthesis.py`)
+A Controller learns to write Python code to solve a math problem.
+- **Task**: Synthesize `f(x) = 2x + 1` using a library of ops [`Add`, `Mul`, `Square`, `Identity`].
+- **Learning**: Uses `soft_switch` to blend operations and Temperature Annealing to crystallize the program.
+- **Result**: Converges to the exact discrete program `Mul(2) -> Add(1)`.
+
+### 3. Neural Register Machine (`demo_register_machine.py`)
+A "Neural RAM" model that learns to address memory.
+- **Task**: Synthesize `f(x) = x^2 + 2x` using 5 registers and 3 steps.
+- **Learning**: Uses `soft_index` (Attention) to read operands from memory.
+- **Result**: Learns a valid dependency graph (DAG) by reading the correct past registers to chain operations.
+
+## 🛠️ Usage
+
+### Installation
+Clone the repo and install dependencies (PyTorch):
+```bash
+pip install torch
+```
+
+### Basic Optimization
+```python
+from interpreter import NeuralInterpreter
+from engine import NousModel
+from symbolic import ExprVar
+import torch
+
+model = NousModel()
+interpreter = NeuralInterpreter(model)
+
+# Define python code
+code = """
+y = x * x + 2 * x + 1
+return y
+"""
+
+# Optimize x to minimize y
+x = torch.tensor([5.0], requires_grad=True)
+optimizer = torch.optim.Adam([x], lr=0.1)
+
+for i in range(100):
+    optimizer.zero_grad()
+    
+    # 1. Execute Code
+    inputs = {'x': ExprVar('x')}
+    res_node = interpreter.execute(code, inputs)
+    
+    # 2. Evaluate & Backpropagate
+    context = {'x': x}
+    val = model.expand(res_node, context)[0] # Value
+    
+    val.backward()
+    optimizer.step()
+    
+print(f"Solution: {x.item()}") # Should be -1.0
+```
+
+## 📂 Project Structure
+
+- `interpreter.py`: The `NeuralInterpreter` class (exec wrapper).
+- `engine.py`: The `NousModel` and Hilbert Engine (Taylor series backbone).
+- `symbolic.py`: Defines symbolic nodes (`ExprAdd`, `ExprFunc`, etc).
+- `demo_*.py`: Experiment scripts (Rocket, Programmer, Register Machine).
+- `verify.py`: Regression test suite.
+
+## 🧠 Architecture
+Nous replaces the standard Python interpreter with a **Tracing Context**. It injects `SymbolicNode` objects that overload operators (`__add__`, `__mul__`), building a computation graph dynamically as the code runs. This graph is then compiled into a Taylor Series expansion by the Hilbert Engine, enabling precise differentiation.
+
+---
+**Advanced Agentic Coding -- Google DeepMind**

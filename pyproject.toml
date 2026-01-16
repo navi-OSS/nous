@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nous"
+version = "2.0.0"
+description = "Nous Engine: Differentiable Symbolic Programming"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "torch",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nous*"]
