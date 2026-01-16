@@ -148,27 +148,24 @@ class NousHilbertCore(nn.Module):
     def compose(self, outer, inner):
         """
         Compute function composition f(g(x)) in Taylor representation.
+        Optimized version using cached powers and batched multiplication.
         """
-        res = torch.zeros_like(inner)
-        res[..., 0] = outer[..., 0]
-        
-        g_pow = torch.zeros_like(inner)
-        g_pow[..., 0] = 1.0
-        
         max_terms = inner.shape[-1]
         
-        for k in range(1, max_terms):
-            if torch.all(outer[..., k] == 0):
-                pass
-            
-            if k > 1:
-                g_pow = self._poly_mul(g_pow, inner)
-            else:
-                g_pow = inner
-            
-            scale = outer[..., k:k+1]
-            res = res + scale * g_pow
-            
+        # Pre-compute all powers of inner: [1, g, g², g³, ...]
+        # This enables batched operations instead of sequential
+        g_powers = torch.zeros(max_terms, max_terms, dtype=inner.dtype, device=inner.device)
+        g_powers[0, 0] = 1.0  # g^0 = 1
+        
+        if max_terms > 1:
+            g_powers[1] = inner  # g^1 = g
+            for k in range(2, max_terms):
+                g_powers[k] = self._poly_mul(g_powers[k-1], inner)
+        
+        # Vectorized composition: sum(outer[k] * g^k)
+        # outer: [max_terms], g_powers: [max_terms, max_terms]
+        # Result: sum over k of outer[k] * g_powers[k]
+        res = torch.einsum('k,kn->n', outer, g_powers)
         return res
         
     def multiply(self, a, b):
@@ -176,13 +173,46 @@ class NousHilbertCore(nn.Module):
         return self._poly_mul(a, b)
 
     def _poly_mul(self, a, b):
-        """Truncated polynomial multiplication via discrete convolution."""
+        """
+        Truncated polynomial multiplication via FFT convolution.
+        O(n log n) and fully parallelizable on GPU.
+        """
+        n = a.shape[-1]
+        
+        # FFT-based convolution: 
+        # 1. Pad to 2n to avoid circular wrap-around
+        # 2. FFT both, multiply, IFFT
+        # 3. Truncate to n terms
+        
+        # Handle batched inputs
+        original_shape = a.shape[:-1]
+        a_flat = a.reshape(-1, n)
+        b_flat = b.reshape(-1, n)
+        
+        # FFT convolution
+        a_fft = torch.fft.fft(a_flat, n=2*n, dim=-1)
+        b_fft = torch.fft.fft(b_flat, n=2*n, dim=-1)
+        c_fft = a_fft * b_fft
+        c_full = torch.fft.ifft(c_fft, dim=-1).real
+        
+        # Truncate to original size
+        c = c_full[..., :n]
+        
+        # Reshape back
+        return c.reshape(*original_shape, n)
+
+    def _poly_mul_naive(self, a, b):
+        """
+        Naive O(n²) polynomial multiplication for reference/fallback.
+        Kept for numerical precision comparison.
+        """
         n = a.shape[-1]
         c = torch.zeros_like(a)
         for k in range(n):
             i_indices = torch.arange(k + 1, device=a.device)
             c[..., k] = (a[..., i_indices] * b[..., k - i_indices]).sum(dim=-1)
         return c
+
 
     def eval_at(self, coeffs, x):
         """Horner's method evaluation."""
