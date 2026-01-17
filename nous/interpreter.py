@@ -58,9 +58,10 @@ class NeuralInterpreter:
     
     Hardened with AST-based sandboxing and restricted execution context.
     """
-    def __init__(self, model, memory=None):
+    def __init__(self, model, memory=None, text_memory=None):
         self.model = model
-        self.memory = memory
+        self.memory = memory          # Working Memory (RAM) - Differentiable Tensor
+        self.text_memory = text_memory # Long-term Memory (HDD) - Text Retrieval
         self.hard_logic = getattr(model, 'hard_logic', False)
         self._cache = {} # Bytecode cache
         # Pre-initialize math wrappers and base context
@@ -199,6 +200,7 @@ result = _main_()
         ctx['soft_compile'] = self._create_soft_compile_wrapper()
         
         ctx['solve_system'] = self._create_solve_system_wrapper()
+        ctx['solve_logic'] = self._create_solve_logic_wrapper()
         
         # Big Data / I/O (SUPERVISED)
         ctx['soft_read_csv'] = self._create_soft_read_csv_wrapper()
@@ -213,6 +215,15 @@ result = _main_()
             ctx['mem_read'] = self.memory.read
             ctx['mem_write'] = self.memory.write
             ctx['mem_content_read'] = self.memory.content_addressing
+            
+        # Inject Text Memory Operations
+        if self.text_memory:
+            def memory_retrieve(query, k=1):
+                # Unpack symbolic if needed? usually query is a tensor
+                if isinstance(query, SymbolicNode) and hasattr(query, 'value'):
+                    query = query.value
+                return self.text_memory.retrieve(query, k=k)
+            ctx['memory_retrieve'] = memory_retrieve
             
         return ctx
 
@@ -828,6 +839,13 @@ result = _main_()
             # vars: list of strings
             return self.model.forward(equations, op='solve_system', vars=vars)
         return solve_system
+
+    def _create_solve_logic_wrapper(self):
+        def solve_logic(constraints, vars):
+            # Wrapper to call model.solve_logic
+            # constraints: list of expressions that should be True (1.0)
+            return self.model.forward(constraints, op='solve_logic', vars=vars)
+        return solve_logic
 
     def _wrap(self, val):
         if isinstance(val, (int, float)): return ExprConst(float(val))

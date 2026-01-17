@@ -11,10 +11,12 @@ import torch.nn.functional as F
 
 class NeuralMemory(nn.Module):
     """
-    A differentiable memory bank using attention mechanisms.
+    A differentiable memory bank (System 1/2 Working Memory).
     
-    Read: Weighted sum over all memory slots using address weights.
-    Write: Weighted update to all memory slots using address weights.
+    Analogy: This is the 'RAM' of the neural system.
+    - Stores: Latent vectors (dense tensors).
+    - Operations: Differentiable read()/write() via soft attention.
+    - Use Case: Algorithmic learning (e.g. learning to reverse a list).
     """
     def __init__(self, num_slots=16, slot_size=32):
         super().__init__()
@@ -163,9 +165,12 @@ class NeuralStack(nn.Module):
 
 class TextMemory:
     """
-    Infinite Text Memory (System 3).
-    Stores raw text strings coupled with vector embeddings.
-    Dynamically grows (Python list) to support unlimited context.
+    Infinite Text Memory (System 3 Long-Term Memory).
+    
+    Analogy: This is the 'Hard Drive' or 'Library'.
+    - Stores: Raw text and embeddings (sparse/retrieval-based).
+    - Operations: search/retrieve (RAG style).
+    - Use Case: Knowledge retrieval ("Who is the president?").
     """
     def __init__(self, embedding_dim=32):
         self.embedding_dim = embedding_dim

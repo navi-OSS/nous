@@ -858,6 +858,9 @@ class NousModel(nn.Module):
         if op == 'solve_system':
             return self.solve_system(x, kwargs['vars'])
             
+        if op == 'solve_logic':
+            return self.solve_logic(x, kwargs['vars'])
+            
         raise ValueError(f"Unknown operation: {op}")
 
     def solve_system(self, equations, variables, attempts=12, iterations=300):
@@ -978,6 +981,65 @@ class NousModel(nn.Module):
             final_list.append(point)
             
         return final_list
+
+    def solve_logic(self, constraints, variables):
+        """
+        Solve a boolean satisfiability (SAT) problem differentiably.
+        
+        Args:
+            constraints: List of SymbolicNodes that must evaluate to 1.0 (True).
+            variables: List of variable names.
+            
+        Returns:
+            List of valid binary assignments e.g. [[0.0, 1.0], ...].
+        """
+        # 1. Convert Logic to Arithmetic Roots
+        # We want Constraint == 1.0, so we solve for (1.0 - Constraint) == 0.0
+        # BUT: solve_system minimizes sum of squared errors.
+        
+        system_equations = []
+        
+        # A. Semantic Constraints
+        for c in constraints:
+            # If c is meant to be True, then 1-c should be 0.
+            # We assume users pass arithmetic logic (x*y for AND, x+y-x*y for OR)
+            # Or use soft logic primitives.
+            # Ideally, we construct the equation (1.0 - c)
+            from .symbolic import ExprConst, ExprSub
+            eq = ExprSub(ExprConst(1.0), c)
+            system_equations.append(eq)
+            
+        # B. Binary Constraints
+        # For every variable v, we enforce v * (1 - v) = 0
+        # This forces roots to be either 0 or 1.
+        from .symbolic import ExprVar, ExprMul, ExprSub, ExprConst
+        for v_name in variables:
+            v = ExprVar(v_name)
+            # v * (1 - v)
+            # (v) * (1 - v)
+            term = ExprMul(v, ExprSub(ExprConst(1.0), v))
+            system_equations.append(term)
+            
+        # 2. Solve using Newton-Raphson
+        # We need aggressive initialization because the landscape has many local minima (0, 1)
+        # solve_system snaps to integers, which is perfect for binary.
+        roots = self.solve_system(system_equations, variables, attempts=20, iterations=500)
+        
+        # 3. Filter for strictly binary results (redundant due to B, but safe)
+        valid_roots = []
+        for r in roots:
+            is_binary = True
+            for val in r:
+                if abs(val - 0.0) > 1e-2 and abs(val - 1.0) > 1e-2:
+                    is_binary = False
+                    break
+            if is_binary:
+                # Clean up to strictly 0/1 integers
+                clean_r = [1 if v > 0.5 else 0 for v in r]
+                if clean_r not in valid_roots:
+                    valid_roots.append(clean_r)
+                    
+        return valid_roots
 
     def compile(self, mode="reduce-overhead"):
         """
