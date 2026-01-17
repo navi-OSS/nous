@@ -161,7 +161,77 @@ class NeuralStack(nn.Module):
         return self.memory.read(weights)
 
 
-# Demo
+class TextMemory:
+    """
+    Infinite Text Memory (System 3).
+    Stores raw text strings coupled with vector embeddings.
+    Dynamically grows (Python list) to support unlimited context.
+    """
+    def __init__(self, embedding_dim=32):
+        self.embedding_dim = embedding_dim
+        # Storage: list of {'text': str, 'vector': Tensor}
+        self.storage = []
+        
+    def add(self, text, vector):
+        """
+        Add a text entry to memory.
+        
+        Args:
+            text: The string content.
+            vector: Embedding tensor [dim].
+        """
+        if vector.shape[-1] != self.embedding_dim:
+            raise ValueError(f"Vector dim {vector.shape[-1]} != {self.embedding_dim}")
+            
+        entry = {
+            'text': text,
+            'vector': vector.detach().cpu() # Store detached to save graph memory
+        }
+        self.storage.append(entry)
+        
+    def retrieve(self, query_vector, k=1):
+        """
+        Retrieve top-k text strings closest to query.
+        
+        Args:
+            query_vector: [dim] tensor.
+            k: Number of results.
+        Returns:
+            List of (text, score) tuples.
+        """
+        if not self.storage:
+            return []
+            
+        # Stack stored vectors: [N, dim]
+        # We process in chunks if needed, but for now simple stack
+        memory_matrix = torch.stack([e['vector'] for e in self.storage]).to(query_vector.device)
+        
+        # Normalize
+        query_norm = F.normalize(query_vector.unsqueeze(0), dim=-1)
+        mem_norm = F.normalize(memory_matrix, dim=-1)
+        
+        # Cosine similarity: [1, N]
+        sims = torch.matmul(query_norm, mem_norm.T).squeeze(0)
+        
+        # Top-K
+        k = min(k, len(self.storage))
+        top_k_vals, top_k_inds = torch.topk(sims, k=k)
+        
+        results = []
+        for i in range(k):
+            idx = top_k_inds[i].item()
+            score = top_k_vals[i].item()
+            results.append((self.storage[idx]['text'], score))
+            
+        return results
+    
+    def clear(self):
+        self.storage = []
+
+    def __len__(self):
+        return len(self.storage)
+
+
 if __name__ == "__main__":
     print("=== Neural Memory Demo ===")
     mem = NeuralMemory(num_slots=8, slot_size=4)
@@ -181,3 +251,11 @@ if __name__ == "__main__":
     query = torch.tensor([1.0, 2.0, 3.0, 4.0])
     weights = mem.content_addressing(query, beta=5.0)
     print(f"Content-based lookup for [1,2,3,4]: slot weights = {weights.tolist()}")
+    
+    print("\n=== TextMemory Demo ===")
+    tm = TextMemory(embedding_dim=4)
+    tm.add("Hello World", torch.tensor([1.0, 0.0, 0.0, 0.0]))
+    tm.add("Neural Network", torch.tensor([0.0, 1.0, 0.0, 0.0]))
+    
+    res = tm.retrieve(torch.tensor([1.0, 0.1, 0.0, 0.0]), k=1)
+    print(f"Query [1, 0.1, ...]: Found '{res[0][0]}' (score={res[0][1]:.4f})")
