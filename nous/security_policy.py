@@ -10,7 +10,7 @@ SAFE_TORCH_OPS = [
     'sinh', 'cosh', 'tanh', 'sqrt', 'abs', 'mean', 'sum', 'std', 'var',
     'dot', 'matmul', 'norm', 'sigmoid', 'softmax', 'round', 'floor', 'ceil',
     'clamp', 'minimum', 'maximum', 'where', 'stack', 'cat', 'unique',
-    'tensor', 'arange', 'linspace', 'ones', 'zeros', 'eye',
+    'tensor', 'arange', 'linspace', 'ones', 'zeros', 'eye', 'rand', 'randn',
     'unsqueeze', 'squeeze', 'reshape', 'view', 'transpose', 'permute',
     'argmin', 'argmax', 'topk', 'sort', 'roll', 'flip', 'rot90'
 ]

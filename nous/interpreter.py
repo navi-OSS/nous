@@ -210,6 +210,11 @@ result = _main_()
         ctx['soft_load_book'] = self._create_soft_load_book_wrapper()
         ctx['soft_search'] = self._create_soft_search_wrapper()
         
+        # ARC / Grid (System 5)
+        from .arc import SoftGrid
+        ctx['SoftGrid'] = SoftGrid
+        ctx['grid'] = SoftGrid
+        
         # Inject Memory Operations if memory is attached
         if self.memory:
             ctx['mem_read'] = self.memory.read
