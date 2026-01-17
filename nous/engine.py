@@ -6,9 +6,10 @@ class NousHilbertCore(nn.Module):
     """
     Core symbolic computation engine using Taylor series representations.
     """
-    def __init__(self, max_terms=32):
+    def __init__(self, max_terms=32, hard_logic=False):
         super().__init__()
         self.max_terms = max_terms
+        self.hard_logic = hard_logic
         self.indices = nn.Parameter(torch.arange(max_terms, dtype=torch.float32), requires_grad=False)
         self.factorials = nn.Parameter(torch.tensor([float(math.factorial(i)) for i in range(max_terms)], dtype=torch.float32), requires_grad=False)
 
@@ -74,6 +75,47 @@ class NousHilbertCore(nn.Module):
                 curr = curr * (0.5 - n + 1) / n
                 coeffs[n] = curr
         return coeffs
+
+    def get_taylor_sigmoid(self):
+        """Taylor series approximation for sigmoid(x)."""
+        coeffs = torch.zeros(self.max_terms, dtype=self.factorials.dtype, device=self.factorials.device)
+        # s(0) = 0.5, s'(0) = 0.25, s'''(0) = -1/48
+        coeffs[0] = 0.5
+        if self.max_terms > 1:
+            coeffs[1] = 0.25
+        if self.max_terms > 3:
+            coeffs[3] = -1.0/48.0
+        return coeffs
+
+    def get_taylor_abs(self, eps=1e-6):
+        """Smooth absolute value approximation: sqrt(x^2 + eps)."""
+        base = self.get_taylor_sqrt1p()
+        # Input to sqrt1p is u = x^2/eps
+        u = torch.zeros(self.max_terms, dtype=self.factorials.dtype, device=self.factorials.device)
+        if self.max_terms > 2:
+            u[2] = 1.0 / eps
+        
+        res = self.compose(base, u)
+        return res * math.sqrt(eps)
+
+    def get_identity(self, name):
+        """Dispatches to the correct Taylor identity getter."""
+        identities = {
+            'exp': self.get_taylor_exp,
+            'sin': self.get_taylor_sin,
+            'cos': self.get_taylor_cos,
+            'log1p': self.get_taylor_log1p,
+            'sinh': self.get_taylor_sinh,
+            'cosh': self.get_taylor_cosh,
+            'tanh': self.get_taylor_tanh,
+            'tan': self.get_taylor_tan,
+            'sqrt1p': self.get_taylor_sqrt1p,
+            'sigmoid': self.get_taylor_sigmoid,
+            'abs': self.get_taylor_abs,
+        }
+        if name not in identities:
+            raise ValueError(f"No Taylor identity known for function '{name}'")
+        return identities[name]()
 
     def derivative(self, coeffs):
         """Compute polynomial derivative by coefficient shifting and scaling."""
@@ -674,18 +716,33 @@ from .geometry import SymbolicGeometry
 from .symbolic import SymbolicNode
 
 class NousModel(nn.Module):
-    def __init__(self, max_terms=32, solver_iterations=60, solver_tolerance=1e-9):
+    def __init__(self, max_terms=32, solver_iterations=60, solver_tolerance=1e-9, hard_logic=False):
         super().__init__()
         self.max_terms = max_terms
         self.solver_iterations = solver_iterations
         self.solver_tolerance = solver_tolerance
+        self.hard_logic = hard_logic
         
-        self.hilbert = NousHilbertCore(max_terms=max_terms)
+        self.hilbert = NousHilbertCore(max_terms=max_terms, hard_logic=hard_logic)
         self.algebra = NousAlgebra(iterations=solver_iterations)
         self.geometry = SymbolicGeometry()
         # Learnable projection matrix for coefficient discovery
         self.discovery = nn.Parameter(torch.randn(max_terms, max_terms, dtype=torch.float32) * 0.01)
 
+    def to_symbolic(self, x):
+        """Convert a Python value (scalar, list) to its SymbolicNode equivalent."""
+        from .symbolic import ExprConst, ExprList, SymbolicNode
+        if isinstance(x, SymbolicNode):
+            return x
+        if isinstance(x, (int, float)):
+            return ExprConst(float(x))
+        if isinstance(x, list):
+            return ExprList([self.to_symbolic(e) for e in x])
+        if torch.is_tensor(x) and x.numel() == 1:
+            # Preserve gradient if it's a tensor
+            return ExprConst(x)
+        return x
+ 
     def expand(self, node, center=0.0):
         """Expand a symbolic node to Taylor coefficients at a given center."""
         if not isinstance(node, SymbolicNode):

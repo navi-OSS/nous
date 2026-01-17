@@ -34,16 +34,31 @@ class NeuralMemory(nn.Module):
     def read(self, address_weights):
         """
         Read from memory using soft attention weights.
-        
-        Args:
-            address_weights: [num_slots] tensor of attention weights (should sum to 1)
-        Returns:
-            [slot_size] tensor of read contents
         """
         # Normalize weights to probabilities
         weights = F.softmax(address_weights, dim=-1)
         # Weighted sum: sum_i(w_i * M_i)
         return torch.matmul(weights, self.memory)
+    
+    def top_k_attention(self, query, k=5, beta=10.0):
+        """
+        Differentiable top-k retrieval approximation.
+        Masks all but the top k similarities, then performs softmax.
+        """
+        # Cosine similarity
+        query_norm = F.normalize(query.unsqueeze(0), dim=-1)
+        memory_norm = F.normalize(self.memory, dim=-1)
+        similarity = torch.matmul(query_norm, memory_norm.T).squeeze(0)
+        
+        # Soft-masking: keep only top k
+        topk_vals, _ = torch.topk(similarity, k=min(k, self.num_slots))
+        threshold = topk_vals[-1]
+        
+        # Differentiable mask: sigmoid(sharpen * (sim - thresh))
+        mask = torch.sigmoid(beta * (similarity - threshold))
+        
+        # Softmax over masked similarities
+        return F.softmax(beta * similarity + (1.0 - mask) * -1e9, dim=-1)
     
     def write(self, address_weights, value, erase_strength=0.0):
         """
@@ -63,7 +78,14 @@ class NeuralMemory(nn.Module):
         
         # Add step: M = M + w * v
         add = weights.unsqueeze(1) * value.unsqueeze(0)
-        self.memory.data = self.memory + add
+        
+        # Functional update to preserve gradients (don't use .data)
+        # We overwrite self.memory (it stops being a leaf Parameter and becomes an activation)
+        # We must dereference it from nn.Module parameters first to avoid TypeError
+        new_mem = self.memory + add
+        if 'memory' in self._parameters:
+            del self._parameters['memory']
+        self.memory = new_mem
         
     def content_addressing(self, query, beta=1.0):
         """

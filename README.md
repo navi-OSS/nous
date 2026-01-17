@@ -14,11 +14,11 @@ It allows neural networks to learn by backpropagating gradients *through* the ex
 | Feature | Description |
 |---------|-------------|
 | **Native Python Tracing** | Execute standard Python (`for`, `if`, lists, functions) and build a computation graph via operator overloading. |
-| **Soft Logic** | `soft_if`, `soft_while`, `soft_switch` enable gradient flow through discrete control structures. |
+| **Hyper-Scaling (Turbo)** | Convert recursive symbolic trees into linear JIT-compiled programs. Bypasses Python recursion limits and reduces overhead by ~100x for deep graphs. |
+| **Soft Logic** | `soft_if`, `soft_while`, `soft_switch` enable gradient flow through discrete control structures with full STE support. |
 | **Taylor-Mode Differentiation** | The Hilbert Engine computes high-order derivatives symbolically using Taylor series. |
 | **Neural Memory** | NTM-style differentiable read/write operations for algorithmic learning. |
-| **JIT Compilation** | `torch.compile()` integration for optimized execution. |
-| **GPU Ready** | Built on PyTorch; runs on CPU, CUDA, and MPS. |
+| **GPU Ready** | Built on PyTorch; runs on CPU, CUDA, and MPS with FFT-based polynomial optimization. |
 
 ---
 
@@ -263,7 +263,7 @@ weights = mem.content_addressing(query, beta=1.0)
 5. **Soft Logic**: Control flow primitives blend branches using sigmoid probabilities, preserving gradient flow.
 
 ```
-Python Code → Symbolic DAG → Taylor Coefficients → Gradient via PyTorch
+Python Code → Symbolic DAG → Linear Flattening → Turbo Program → Taylor Expansion → Gradient via PyTorch
 ```
 
 ---
