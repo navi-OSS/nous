@@ -1,0 +1,5 @@
+Robustness Check Results:
+- Pixels: PASS (Differentiable)
+- Spatial: FAIL (Integer Casting Crash)
+
+Upgrading to Soft Spatial Transformers...
