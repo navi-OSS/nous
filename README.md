@@ -9,22 +9,21 @@
 It bridges the gap between neural networks and symbolic logic by allowing gradients to flow *through* Python functions, loops, and conditionals, effectively turning code into a differentiable learning substrate.
 
 ---
-
-## 🚀 Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Autonomous Solver (V8.1)** | `solve_system` autonomously derives gradients and finds exact roots for multivariate systems using a differentiable Newton-Raphson optimizer. |
-| **Symbolic Simplification (V8.2)** | Recursive graph pruning automatically removes redundant operations (e.g., `x+0`, `1*x`) for clean, human-readable symbolic output. |
-| **Native Tracing** | Execute standard Python (`for`, `if`, functions) and capture a dynamic computation graph via operator overloading. |
-| **Soft Logic** | `soft_if`, `soft_while`, `soft_switch` enable gradient flow through discrete control structures using Soft Straight-Through Estimators (STE). |
-| **Hilbert Engine** | A high-performance symbolic kernel that computes high-order derivatives and Taylor expansions. |
-| **Neural Memory** | A differentiable NTM-style memory bank with `top_k` attention and content-based addressing. |
-| **Secure Sandbox** | AST-based security policy blocks unsafe calls (`os`, `sys`, `eval`) while allowing safe mathematical operations. |
-
----
-
-## ⚡ Quickstart
+ 
+ ## 🚀 Key Features
+ 
+ | Feature | Description |
+ |---------|-------------|
+ | **Autonomous Solver (System 2)** | `solve_system` autonomously derives gradients and finds exact roots for multivariate systems. |
+ | **Infinite Memory (System 3)** | `TextMemory` bridge enables the interpreter to retrieve unlimited text context (RAG). |
+ | **Logical Solver (System 4)** | `solve_logic` maps discrete boolean constraints (SAT) to continuous optimization landscapes. |
+ | **ARC Vision Toolkit (System 6)** | Differentiable primitives (`soft_crop`, `rotate`, `find`) for visual reasoning and grid manipulation. |
+ | **Native Tracing** | Execute standard Python (`for`, `if`, functions) and capture a dynamic computation graph. |
+ | **Soft Logic** | `soft_if`, `soft_while` enable gradient flow through discrete control structures. |
+ 
+ ---
+ 
+ ## ⚡ Quickstart
 
 ### 1. The Autonomous Solver
 Solve complex calculus problems in a single line. The engine handles differentiation, optimization, and exactness snapping.
@@ -83,6 +82,41 @@ return final_state
 """
 
 # ... (standard PyTorch training loop) ...
+```
+
+### 3. Logical Solver (System 4)
+Solve discrete logic puzzles ($x \oplus y$ and $\neg x$) using gradients:
+```python
+code = """
+# Find x, y in {0, 1}
+x, y = ExprVar('x'), ExprVar('y')
+
+# Constraints: (x OR y) AND (NOT x)
+c1 = x + y - x*y # OR
+c2 = 1 - x       # NOT
+
+# solve_logic converts this to a continuous landscape
+solutions = solve_logic([c1, c2], vars=['x', 'y'])
+return solutions
+"""
+print(ws.run(code)) # [[0.0, 1.0]]
+```
+
+### 4. ARC Vision (System 6)
+Perform differentiable Grid manipulations. Gradients flow backwards to parameters!
+```python
+code = """
+g = grid(torch.rand(10, 10))
+
+# Differentiable Spatial Transformer Crop
+# The gradients for x, y, h, w are computed automatically
+crop = g.crop(x=2.5, y=3.0, h=4.0, w=4.0)
+
+# Pattern Matching
+heatmap = g.find(template)
+
+return crop.data
+"""
 ```
 
 ---

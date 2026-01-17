@@ -174,28 +174,77 @@ Soft logic primitives make discrete control flow differentiable. See [Soft Logic
 
 ---
 
-## 5. Neural Memory (`memory.py`)
-
-The `NeuralMemory` class implements **Neural Turing Machine**-style memory:
-
-```python
-mem = NeuralMemory(num_slots=16, slot_size=32)
-
-# Write: M[i] += w[i] * value
-mem.write(address_weights, value)
-
-# Read: output = Σ w[i] * M[i]
-output = mem.read(address_weights)
-```
-
-### Addressing Modes
-
-- **Content Addressing**: Cosine similarity lookup.
-- **Location Addressing**: Convolutional shift of previous weights.
-
----
-
-## 6. Data Flow Example
+## 5. Memory Architecture (System 3 & 3.5)
+ 
+ Nous separates memory into two distinct systems, analogous to the brain's working memory vs. long-term memory.
+ 
+ ### 5.1 Neural Memory (System 2 / Working Memory)
+ *Analogous to RAM or Hippocampal state.*
+ 
+ `NeuralMemory` (`memory.py`) stores **differentiable latent vectors**. It is limited in size but fully differentiable, allowing the model to learn *how* to read/write algorithmically.
+ 
+ - **Structure**: Fixed-size circular buffer or addressed slots `[Slots, Dimension]`.
+ - **Ops**: `read(weights)`, `write(weights, val)`.
+ - **Addressing**: Content-based (Cosine) or Location-based (Shift).
+ 
+ ### 5.2 Text Memory (System 3 / Long-Term Memory)
+ *Analogous to Hard Drive or Cortex.*
+ 
+ `TextMemory` (`memory.py`) stores **raw text and embeddings**. It is "infinite" (dynamically resizing) and non-differentiable wrt storage, but differentiable wrt queries.
+ 
+ - **Structure**: Dynamic list of `(text_str, vector_emb, timestamp)`.
+ - **Retrieval (System 3.5)**: `retrieve(query_vector, k)` returns top-k text chunks.
+ - **Deep RAG**: The `NeuralInterpreter` exposes `memory_retrieve` to the DSL, allowing agents to autonomously query this memory during execution.
+ 
+ ---
+ 
+ ## 6. Logical Solver (System 4)
+ 
+ The `solve_logic` primitive extends the engine to handle discrete boolean constraints (SAT problems) by converting them into continuous loss landscapes.
+ 
+ ### Boolean-to-Continuous Mapping
+ 
+ | Boolean Logic | Continuous Penalty ($Loss \to 0$) |
+ |:-------------:|:--------------------------------:|
+ | `True`        | $0.0$                            |
+ | `A == B`      | $(A - B)^2$                      |
+ | `A and B`     | $Loss(A) + Loss(B)$              |
+ | `not A`       | $1.0 - A$ (if $A \in \{0, 1\}$)  |
+ 
+ ### Binary Forcing
+ Variables are forced to binary values $\{0, 1\}$ by adding the constraint:
+ $x \cdot (1 - x) = 0$
+ 
+ This creates potential wells at 0 and 1, which the optimizer settles into.
+ 
+ ---
+ 
+ ## 7. ARC / Computer Vision Toolkit (System 5 & 6)
+ 
+ The `noun.arc` module provides **differentiable 2D grid manipulation**, enabling the engine to solve visual reasoning tasks (like ARC).
+ 
+ ### SoftGrid Primitive
+ `SoftGrid` wraps a PyTorch tensor `[H, W, C]` and exposes high-level, differentiable methods.
+ 
+ ### Differentiable Spatial Transformers (STN)
+ To learn *where* to look or crop, we cannot use integer slicing. System 6 uses **Spatial Transformer Networks**:
+ 
+ 1. **Grid Generation**: `F.affine_grid` creates a sampling mesh based on continuous $x, y, w, h$ parameters.
+ 2. **Sampling**: `F.grid_sample` interpolates values from the source grid.
+ 
+ This allows gradients to flow from the loss back to the coordinate parameters: $\frac{\partial Loss}{\partial x}, \frac{\partial Loss}{\partial y}$.
+ 
+ ### Available Primitives
+ - **`crop(x, y, w, h)`**: STN-based crop.
+ - **`rotate(deg)`**: Affine rotation.
+ - **`flip(axis)`**: Tensor flip.
+ - **`find(template)`**: Convolutional pattern matching (returns heatmap).
+ - **`replace_color(old, new)`**: Soft masking (`sigmoid(dist)`).
+ - **`canvas_resize(h, w)`**: Non-distorting padding/cropping.
+ 
+ ---
+ 
+ ## 8. Data Flow Example
 
 ```python
 code = "y = sin(x * x)"
