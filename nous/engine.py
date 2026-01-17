@@ -227,21 +227,36 @@ class NousHilbertCore(nn.Module):
         # 3. Truncate to n terms
         
         # Handle batched inputs
-        original_shape = a.shape[:-1]
-        a_flat = a.reshape(-1, n)
-        b_flat = b.reshape(-1, n)
+        # Determine the target batch shape by broadcasting a and b
+        # a: [..., n], b: [..., n]
+        # We need the shape of (a[..., 0] + b[..., 0]) to know the broadcasted prefix
+        try:
+             broadcast_shape = torch.broadcast_shapes(a.shape[:-1], b.shape[:-1])
+        except RuntimeError:
+             # Fallback for scalar expansion if needed, but torch.broadcast_shapes should handle it
+             pass
+
+        # We can rely on torch's fft broadcasting, but we need to know the final shape to reshape 'c'
+        # c comes out of ifft as a flat vector if we don't be careful, or preserved dims.
+        # Actually fft operations preserve dimensions.
         
-        # FFT convolution
-        a_fft = torch.fft.fft(a_flat, n=2*n, dim=-1)
-        b_fft = torch.fft.fft(b_flat, n=2*n, dim=-1)
-        c_fft = a_fft * b_fft
-        c_full = torch.fft.ifft(c_fft, dim=-1).real
+        # 1. Pad to 2n
+        a_pad = torch.cat([a, torch.zeros_like(a)], dim=-1)
+        b_pad = torch.cat([b, torch.zeros_like(b)], dim=-1)
         
-        # Truncate to original size
+        # 2. FFT
+        A = torch.fft.fft(a_pad)
+        B = torch.fft.fft(b_pad)
+        
+        # 3. Multiply in frequency domain (broadcasts automatically)
+        C = A * B
+        
+        # 4. IFFT
+        c_full = torch.fft.ifft(C).real
+        
+        # 5. Truncate
         c = c_full[..., :n]
-        
-        # Reshape back
-        return c.reshape(*original_shape, n)
+        return c
 
     def _poly_mul_naive(self, a, b):
         """
@@ -839,16 +854,135 @@ class NousModel(nn.Module):
             # 3. Re-order for solve (descending)
             desc_deriv = torch.flip(stripped_deriv, dims=[-1])
             return self.algebra.solve(desc_deriv)
-
+            
+        if op == 'solve_system':
+            return self.solve_system(x, kwargs['vars'])
             
         raise ValueError(f"Unknown operation: {op}")
+
+    def solve_system(self, equations, variables, attempts=12, iterations=300):
+        """
+        Solve a system of symbolic equations: F(x) = 0.
+        
+        Args:
+            equations: List of SymbolicNodes e.g. [f1, f2]
+            variables: List of strings e.g. ['x', 'y']
+            attempts: Number of random initialization points
+            iterations: Max optimization steps
+        Returns:
+            List of unique root vectors found.
+        """
+        # 1. Setup Initial Guesses
+        # Random initialization (sigma=2.0 covers [-4, 4] effectively)
+        n_vars = len(variables)
+        device = self.hilbert.indices.device
+        
+        # We optimize a batch of 'particles' to find roots
+        coords = (torch.randn(attempts, n_vars, device=device) * 2.0).requires_grad_(True)
+        optimizer = torch.optim.Adam([coords], lr=0.05)
+        
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.5)
+        
+        # 2. Optimization Loop (Newton-ish via Gradient Descent on Norm)
+        for i in range(iterations):
+            optimizer.zero_grad()
+            
+            # center dict for to_taylor: {var_name: tensor_of_values}
+            # coords: [batch, n_vars]
+            # We construct separate tensors for each var for ExprVar.to_taylor
+            center_dict = {
+                var_name: coords[:, idx] 
+                for idx, var_name in enumerate(variables)
+            }
+            
+            total_loss = 0.0
+            for eq in equations:
+                # Evaluate equation at current coords
+                # to_taylor returns [batch, max_terms] or [batch, ..., max_terms]
+                # We essentially want the value (0-th term)
+                # Note: ExprVar with vector input returns [batch, max_terms]
+                coeffs = eq.to_taylor(center=center_dict, max_terms=1, hilbert=self.hilbert)
+                val = coeffs[..., 0] # Extract scalar value
+                total_loss = total_loss + val**2
+            
+            # Loss is sum of squared errors of all equations
+            loss = total_loss.mean()
+            
+            loss.backward()
+            optimizer.step()
+            scheduler.step(loss)
+            
+            if loss.item() < 1e-7:
+                break
+                
+        # 3. Process & Snap Results
+        final_coords = coords.detach() # [batch, n_vars]
+        
+        # Filter converged points
+        converged_mask = torch.zeros(attempts, dtype=torch.bool, device=device)
+        
+        # Check residual for each point individually
+        for k in range(attempts):
+            point_feed = {v: final_coords[k, idx] for idx, v in enumerate(variables)}
+            # Verify residual
+            err = 0.0
+            for eq in equations:
+                coeffs = eq.to_taylor(center=point_feed, max_terms=1, hilbert=self.hilbert)
+                err += coeffs[..., 0].item()**2
+            
+            if err < 1e-3: # Slightly relaxed residual check
+                converged_mask[k] = True
+        
+        valid_points = final_coords[converged_mask]
+        
+        if len(valid_points) == 0:
+            return []
+            
+        # 4. Snap to Grid & Deduplicate
+        # We snap to integers or halves (0.5) if close
+        unique_roots = []
+        
+        for pt in valid_points:
+            # Snap logic
+            snapped = pt.clone()
+            
+            # Try snapping to integer
+            rounded = torch.round(pt)
+            if torch.norm(pt - rounded) < 0.05: # Relaxed snapping tolerance
+                snapped = rounded
+            
+            # TODO: snapping to simple fractions if needed
+            
+            # Linear scan for duplicates
+            is_new = True
+            for known in unique_roots:
+                if torch.norm(snapped - known) < 1e-2:
+                    is_new = False
+                    break
+            
+            if is_new:
+                unique_roots.append(snapped)
+                
+        # Convert to list of lists/tuples for clean return
+        final_list = []
+        for r in unique_roots:
+            point = []
+            for coord in r:
+                val = coord.item()
+                # Fix -0.0
+                if val == 0.0: val = 0.0 
+                # Round for display cleanliness if very close to integer
+                if abs(val - round(val)) < 1e-9:
+                    val = float(round(val))
+                point.append(val)
+            final_list.append(point)
+            
+        return final_list
 
     def compile(self, mode="reduce-overhead"):
         """
         Compile the Hilbert Engine for faster execution using torch.compile.
         
-        Args:
-            mode: Compilation mode, one of "default", "reduce-overhead", "max-autotune"
         Returns:
             self (for chaining)
         """

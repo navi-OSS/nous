@@ -198,6 +198,8 @@ result = _main_()
         ctx['soft_linreg'] = self._create_soft_linreg_wrapper()
         ctx['soft_compile'] = self._create_soft_compile_wrapper()
         
+        ctx['solve_system'] = self._create_solve_system_wrapper()
+        
         # Big Data / I/O (SUPERVISED)
         ctx['soft_read_csv'] = self._create_soft_read_csv_wrapper()
         ctx['soft_groupby_mean'] = self._create_soft_groupby_mean_wrapper()
@@ -818,6 +820,14 @@ result = _main_()
                     results[k.item()] = 0.0
             return results
         return soft_groupby_mean
+
+    def _create_solve_system_wrapper(self):
+        def solve_system(equations, vars):
+            # Wrapper to call model.solve_system
+            # equations: list of SymbolicNodes
+            # vars: list of strings
+            return self.model.forward(equations, op='solve_system', vars=vars)
+        return solve_system
 
     def _wrap(self, val):
         if isinstance(val, (int, float)): return ExprConst(float(val))

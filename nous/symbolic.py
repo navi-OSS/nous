@@ -187,6 +187,10 @@ class SymbolicNode:
         # 'center' can be a float/tensor (scalar context) or a dict {name: val}
         raise NotImplementedError()
 
+    def simplify(self):
+        """Recursively simplify the expression."""
+        return self
+
     def diff(self, var='x'):
         raise NotImplementedError()
 
@@ -248,36 +252,39 @@ class ExprVar(SymbolicNode):
                 else: 
                      c_val = center if self.name == 'x' else 0.0
 
-        res = torch.zeros(max_terms, dtype=torch.float32)
         if torch.is_tensor(c_val):
-             res = res.to(c_val.device) # Match device
+             # c_val might be scalar or tensor [batch_size]
+             # If it's a tensor, we need res to be [..., max_terms]
              
+             # Expand c_val to add the term dimension
+             # Target shape: c_val.shape + (max_terms,)
+             if max_terms > 1:
+                 # Create zeros of shape (..., max_terms - 1)
+                 zeros_shape = c_val.shape + (max_terms - 1,)
+                 zeros = torch.zeros(zeros_shape, dtype=c_val.dtype, device=c_val.device)
+                 res = torch.cat([c_val.unsqueeze(-1), zeros], dim=-1)
+                 
+                 # Set linear term if needed (this part of original logic was for 'x')
+                 if max_terms > 1:
+                     # This logic assumes derivative w.r.t ITSELF is 1.0.
+                     # If we are just evaluating f(x,y) at a point, we don't need the linear term 1.0 
+                     # UNLESS we are doing Taylor expansion w.r.t variables.
+                     # But here we are passing values to 'center'.
+                     # If we want GRADIENT from PyTorch, we need the 0-th term to be the tensor with grad.
+                     pass
+             else:
+                 res = c_val.unsqueeze(-1)
+                 
+            # Original logic for `res[1] = 1.0` was simplistic. 
+            # If we just want value, res[..., 0] is enough.
+            
+             return res
+             
+        # Fallback for scalar floats
+        res = torch.zeros(max_terms, dtype=torch.float32)
         res[0] = c_val
-        if max_terms > 1:
-            # The derivative term.
-            # If we are expanding w.r.t THIS variable, coeff 1 is 1.0.
-            # If we are evaluating multiple variables, we are effectively setting them to (v + epsilon).
-            # But wait, this is Taylor expansion.
-            # If result is f(a,b), we want value.
-            # If we want GRADIENT, PyTorch handles it through res[0].
-            # Do we need higher order terms?
-            # For "Value" computation, max_terms=1 is sufficient?
-            # But the symbolic engine computes Taylor series continuously.
-            # If we pass max_terms=1, we get value.
-            
-            # Let's keep 1.0 at index 1 for "x" if center is scalar.
-            # If center is dict, do we treat all as variables?
-            # Yes, if we want to differentiate w.r.t any of them.
-            # But Taylor series is 1D (powers of one variable t).
-            # This is ambiguous.
-            
-            # For System 2 Experiment, we just want to propagate the Value (0-th term) and Gradients.
-            # So res[0] matters. res[1+] matters if we have differentiation in the script.
-            # If script has code.diff(), it uses Symbolic differentiation logic.
-            # If we just execute, we don't use .diff().
-            # WE ONLY USE to_taylor for evaluation.
-            # So res[0] is critical. res[1] is irrelevant for pure value.
-            res[1] = 1.0 
+        if max_terms > 1: 
+            res[1] = 1.0 # Default derivative placeholder
         return res
     def _flatten_impl(self, memo, ops, constants, vars):
         if self.name not in vars:
@@ -302,6 +309,22 @@ class ExprAdd(SymbolicNode):
 
     def diff(self, var='x'):
         return ExprAdd(self.left.diff(var), self.right.diff(var))
+        
+    def simplify(self):
+        l = self.left.simplify()
+        r = self.right.simplify()
+        
+        # Constant folding
+        if isinstance(l, ExprConst) and isinstance(r, ExprConst):
+            return ExprConst(l.value + r.value)
+            
+        # Identity: x + 0 = x
+        if isinstance(r, ExprConst) and r.value == 0: return l
+        # Identity: 0 + x = x
+        if isinstance(l, ExprConst) and l.value == 0: return r
+        
+        return ExprAdd(l, r)
+
     def __repr__(self): return f"({self.left} + {self.right})"
 
 class ExprSub(SymbolicNode):
@@ -318,6 +341,21 @@ class ExprSub(SymbolicNode):
 
     def diff(self, var='x'):
         return ExprSub(self.left.diff(var), self.right.diff(var))
+        
+    def simplify(self):
+        l = self.left.simplify()
+        r = self.right.simplify()
+        
+        if isinstance(l, ExprConst) and isinstance(r, ExprConst):
+            return ExprConst(l.value - r.value)
+            
+        # x - 0 = x
+        if isinstance(r, ExprConst) and r.value == 0: return l
+        # 0 - x = -x (handled via mul -1 usually, or just keep as 0-x)
+        # x - x = 0 (need equality check, simplified)
+        
+        return ExprSub(l, r)
+
     def __repr__(self): return f"({self.left} - {self.right})"
 
 class ExprMul(SymbolicNode):
@@ -337,6 +375,25 @@ class ExprMul(SymbolicNode):
     def diff(self, var='x'):
         # (uv)' = u'v + uv'
         return ExprAdd(ExprMul(self.left.diff(var), self.right), ExprMul(self.left, self.right.diff(var)))
+        
+    def simplify(self):
+        l = self.left.simplify()
+        r = self.right.simplify()
+        
+        if isinstance(l, ExprConst) and isinstance(r, ExprConst):
+            return ExprConst(l.value * r.value)
+            
+        # x * 1 = x
+        if isinstance(r, ExprConst) and r.value == 1: return l
+        # 1 * x = x
+        if isinstance(l, ExprConst) and l.value == 1: return r
+        # x * 0 = 0
+        if isinstance(r, ExprConst) and r.value == 0: return ExprConst(0.0)
+        # 0 * x = 0
+        if isinstance(l, ExprConst) and l.value == 0: return ExprConst(0.0)
+        
+        return ExprMul(l, r)
+
     def __repr__(self): return f"({self.left} * {self.right})"
 
 class ExprPow(SymbolicNode):
