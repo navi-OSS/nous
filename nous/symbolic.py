@@ -169,8 +169,8 @@ class SymbolicNode:
 
     def _wrap(self, other):
         if isinstance(other, (int, float)): return ExprConst(float(other))
-        if torch.is_tensor(other) and other.numel() == 1:
-            # Preserve gradient if it's a tensor
+        if torch.is_tensor(other):
+            # Preserve gradient if it's a tensor, wrap even if vector
             return ExprConst(other)
         return other
 
@@ -194,24 +194,29 @@ class ExprConst(SymbolicNode):
     def __init__(self, value):
         self.value = value
     def to_taylor(self, center, max_terms, hilbert):
-        # res = torch.zeros(max_terms, dtype=torch.float32)
-        # res[0] = self.value
-        # return res
-        
         # To preserve gradients if self.value is a tensor:
         v = self.value
         if not torch.is_tensor(v):
             v = torch.tensor(float(v), dtype=torch.float32)
         
-        zeros = torch.zeros(max_terms - 1, dtype=v.dtype, device=v.device)
-        return torch.cat([v.unsqueeze(0) if v.dim()==0 else v, zeros])
+        # Result shape: v.shape + (max_terms,)
+        # We want to stack v at index 0, and zeros elsewhere along the last dim.
+        
+        # Add a dimension for terms
+        v_expanded = v.unsqueeze(-1) 
+        
+        if max_terms > 1:
+            zeros_shape = v.shape + (max_terms - 1,)
+            zeros = torch.zeros(zeros_shape, dtype=v.dtype, device=v.device)
+            return torch.cat([v_expanded, zeros], dim=-1)
+        else:
+            return v_expanded
+
     def diff(self, var='x'):
         return ExprConst(0.0)
     def _flatten_impl(self, memo, ops, constants, vars):
         idx = len(constants)
         constants.append(self.value)
-        res_idx = len(ops) + 1000000 # Offset to avoid collision or just use op list?
-        # Actually, let's return ('const', idx)
         return ('const', idx)
 
     def __repr__(self): return str(self.value)
