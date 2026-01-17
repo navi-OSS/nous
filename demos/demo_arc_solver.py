@@ -18,31 +18,38 @@ def demo():
     
     import textwrap
     code = textwrap.dedent("""
-    # Input: 10x10 random grid
-    # We simulate an input directly in DSL or pass via inputs
-    data = torch.rand(10, 10)
+    # Input: 10x10 grid with a 4x4 filled square in center
+    data = torch.zeros(10, 10)
+    data[3:7, 3:7] = 1.0
     g = grid(data)
     
-    # 1. Crop Center (approx coordinates (3,3) size 4x4)
-    g_crop = g.crop(3, 3, 4, 4)
+    # 1. Scale (Stretch) - Interpolation
+    g_stretched = g.scale(20, 20) # Stretches the 4x4 square to 8x8 essentially
     
-    # 2. Resize to 8x8
-    g_up = g_crop.resize(8, 8)
+    # 2. Canvas Resize (Pad) - No Distortion
+    # Resizing canvas to 20x20 while keeping content centered
+    g_padded = g.canvas_resize(20, 20, anchor_y=0.5, anchor_x=0.5)
     
-    # 3. Pixel Logic: Invert Colors
-    g_final = g_up.map_pixels(lambda x: 1.0 - x)
-    
-    return g_final.data
+    # Return both for comparison
+    return [g_stretched.data, g_padded.data]
     """)
     
-    print("Executing ARC Pipeline: Crop -> Resize -> Invert...")
-    result = ws.run(code)
+    print("Executing ARC Pipeline: Scale vs Canvas Resize...")
+    results = ws.run(code)
     
-    print(f"Output Shape: {result.shape}")
-    print(f"Output Sample:\n{result[:4, :4]}")
+    stretched, padded = results[0], results[1]
     
-    assert result.shape == (8, 8)
-    print("SUCCESS: Flexible Grid Manipulation verified.")
+    print(f"Stretched Shape: {stretched.shape}")
+    print(f"Padded Shape: {padded.shape}")
+    
+    # Verify Content Difference
+    # Stretched center should be 'smeared' ~1.0 area larger
+    # Padded center should be exactly 1.0 in a sea of 0.0
+    print(f"Stretched Sum: {stretched.sum():.2f}")
+    print(f"Padded Sum: {padded.sum():.2f}") # Should be 16.0 (4x4 of 1s)
+    
+    assert padded.shape == (20, 20)
+    print("SUCCESS: Flexible Canvas Control verified.")
 
 if __name__ == "__main__":
     demo()

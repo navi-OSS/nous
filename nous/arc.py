@@ -97,9 +97,60 @@ class SoftGrid:
             # Back to [H, W, C]
             out = out.squeeze(0).permute(1, 2, 0)
             
+            out = out.squeeze(0).permute(1, 2, 0)
+            
         return SoftGrid(out)
         
-    def map_pixels(self, func):
+    def scale(self, h, w):
+        """Alias for resize (interpolation)."""
+        return self.resize(h, w)
+
+    def canvas_resize(self, h, w, anchor_y=0.5, anchor_x=0.5, fill_value=0.0):
+        """
+        Change grid dimensions WITHOUT stretching content (Pad/Crop).
+        
+        Args:
+            h, w: New dimensions.
+            anchor_y, anchor_x: Relative position of old content in new grid (0.0=top/left, 0.5=center).
+            fill_value: Value for padding.
+        """
+        old_h, old_w = self.height, self.width
+        
+        # 1. Create Canvas
+        # Handle channels
+        if self.data.dim() == 2:
+            new_shape = (int(h), int(w))
+        else:
+            new_shape = (int(h), int(w), self.data.shape[2])
+            
+        canvas = torch.full(new_shape, fill_value, dtype=self.data.dtype, device=self.data.device)
+        
+        # 2. Calculate Overlay Coordinates
+        # Target top-left
+        # center_y_new = h * anchor_y
+        # center_y_old = old_h * anchor_y
+        # start_y = center_y_new - center_y_old
+        start_y = int((h - old_h) * anchor_y)
+        start_x = int((w - old_w) * anchor_x)
+        
+        # Calculate overlap bounds (intersection of old and new)
+        # Src coords
+        src_y1 = max(0, -start_y)
+        src_x1 = max(0, -start_x)
+        src_y2 = min(old_h, h - start_y)
+        src_x2 = min(old_w, w - start_x)
+        
+        # Dst coords
+        dst_y1 = max(0, start_y)
+        dst_x1 = max(0, start_x)
+        dst_y2 = dst_y1 + (src_y2 - src_y1)
+        dst_x2 = dst_x1 + (src_x2 - src_x1)
+        
+        # 3. Paste
+        if (dst_y2 > dst_y1) and (dst_x2 > dst_x1):
+            canvas[dst_y1:dst_y2, dst_x1:dst_x2] = self.data[src_y1:src_y2, src_x1:src_x2]
+            
+        return SoftGrid(canvas)
         """
         Apply a function to every pixel.
         func: lambda pixel_val -> new_val
